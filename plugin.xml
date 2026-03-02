@@ -1,0 +1,40 @@
+<?xml version='1.0' encoding='utf-8'?>
+<plugin id="cordova-plugin-statusbar" version="1.0.0" xmlns="http://apache.org/cordova/ns/plugins/1.0"
+    xmlns:android="http://schemas.android.com/apk/res/android">
+    <name>Status Bar</name>
+    <description>Cordova Edge-To-Edge Status Bar Plugin</description>
+    <author>Gokula Kannan</author>
+    <license>MIT</license>
+    <js-module name="statusbar" src="www/statusbar.js">
+        <clobbers target="window.StatusBar" />
+    </js-module>
+    <platform name="android">
+        <source-file src="src/android/StatusBar.java" target-dir="src/com/geekay/plugin" />
+
+        <config-file target="res/xml/config.xml" parent="/*">
+            <feature name="StatusBar">
+                <param name="android-package" value="com.geekay.plugin.StatusBar" />
+                <param name="onload" value="true" />
+            </feature>
+            <preference name="StatusBarOverlaysWebView" value="true" />
+        </config-file>
+        
+        <!-- Dependencies -->
+        <framework src="androidx.core:core:1.13.1" />
+        <framework src="androidx.appcompat:appcompat:1.7.0" />
+    </platform>
+
+    <platform name="ios">
+        <config-file target="config.xml" parent="/*">
+            <feature name="StatusBar">
+                <param name="ios-package" value="CDVStatusBar" />
+                <param name="onload" value="true" />
+            </feature>
+            <preference name="StatusBarOverlaysWebView" value="true" />
+            <preference name="StatusBarStyle" value="lightcontent" />
+        </config-file>
+
+        <header-file src="src/ios/CDVStatusBar.h" />
+        <source-file src="src/ios/CDVStatusBar.m" />
+    </platform>
+</plugin>
