@@ -17,7 +17,7 @@
  * under the License.
  *
  */
-package org.apache.cordova.statusbar;
+package com.geekay.plugin;
 
 import android.graphics.Color;
 import android.os.Build;
