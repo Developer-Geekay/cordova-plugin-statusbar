@@ -21,12 +21,12 @@ package com.geekay.plugin;
 
 import android.graphics.Color;
 import android.os.Build;
+import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.view.WindowCompat;
-import androidx.core.view.WindowInsetsCompat;
 import androidx.core.view.WindowInsetsControllerCompat;
 
 import org.apache.cordova.CallbackContext;
@@ -41,7 +41,6 @@ import org.json.JSONException;
 public class StatusBar extends CordovaPlugin {
     private static final String TAG = "StatusBar";
 
-    // Standard Cordova Action Names
     private static final String ACTION_HIDE = "hide";
     private static final String ACTION_SHOW = "show";
     private static final String ACTION_READY = "_ready";
@@ -56,78 +55,91 @@ public class StatusBar extends CordovaPlugin {
     private AppCompatActivity activity;
     private Window window;
 
+    /**
+     * Sets the context of the Command. This can then be used to do things like
+     * get file paths associated with the Activity.
+     *
+     * @param cordova The context of the main Activity.
+     * @param webView The CordovaWebView Cordova is running in.
+     */
     @Override
     public void initialize(final CordovaInterface cordova, CordovaWebView webView) {
         LOG.v(TAG, "StatusBar: initialization");
         super.initialize(cordova, webView);
 
-        activity = (AppCompatActivity) this.cordova.getActivity();
+        activity = this.cordova.getActivity();
         window = activity.getWindow();
 
         activity.runOnUiThread(() -> {
-            // 1. Initial Edge-to-Edge Setup (From your proven logic)
-            window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
-            window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS);
+            // Clear flag FLAG_FORCE_NOT_FULLSCREEN which is set initially
+            // by the Cordova.
+            window.clearFlags(WindowManager.LayoutParams.FLAG_FORCE_NOT_FULLSCREEN);
 
-            // 2. Read 'StatusBarOverlaysWebView' from config.xml (Default is true)
-            boolean overlays = preferences.getBoolean("StatusBarOverlaysWebView", true);
-            setStatusBarTransparent(overlays);
+            // Read 'StatusBarOverlaysWebView' from config.xml, default is true.
+            setStatusBarTransparent(preferences.getBoolean("StatusBarOverlaysWebView", true));
 
-            // 3. Read 'StatusBarBackgroundColor' from config.xml
-            String colorPref = preferences.getString("StatusBarBackgroundColor", "");
-            if (!colorPref.isEmpty()) {
-                setStatusBarBackgroundColor(colorPref);
-            } else if (overlays) {
-                // Start with transparent if overlaying and no color provided
-                window.setStatusBarColor(Color.TRANSPARENT);
-            }
+            // Read 'StatusBarBackgroundColor' from config.xml, default is #000000.
+            setStatusBarBackgroundColor(preferences.getString("StatusBarBackgroundColor", "#000000"));
 
-            // 4. Read 'StatusBarStyle' from config.xml (Default is lightcontent)
-            setStatusBarStyle(preferences.getString("StatusBarStyle", STYLE_LIGHT_CONTENT).toLowerCase());
+            // Read 'StatusBarStyle' from config.xml, default is 'lightcontent'.
+            setStatusBarStyle(
+                preferences.getString("StatusBarStyle", STYLE_LIGHT_CONTENT).toLowerCase()
+            );
         });
     }
 
+    /**
+     * Executes the request and returns PluginResult.
+     *
+     * @param action            The action to execute.
+     * @param args              JSONArry of arguments for the plugin.
+     * @param callbackContext   The callback id used when calling back into JavaScript.
+     * @return                  True if the action was valid, false otherwise.
+     */
     @Override
     public boolean execute(final String action, final CordovaArgs args, final CallbackContext callbackContext) {
         LOG.v(TAG, "Executing action: " + action);
 
         switch (action) {
             case ACTION_READY:
-                boolean isVisible = true;
-                callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK, isVisible));
+                boolean statusBarVisible = (window.getAttributes().flags & WindowManager.LayoutParams.FLAG_FULLSCREEN) == 0;
+                callbackContext.sendPluginResult(new PluginResult(PluginResult.Status.OK, statusBarVisible));
                 return true;
 
             case ACTION_SHOW:
                 activity.runOnUiThread(() -> {
-                    WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-                    if (controller != null) {
-                        controller.show(WindowInsetsCompat.Type.statusBars());
-                        callbackContext.success("Status bar shown");
-                    }
+                    int uiOptions = window.getDecorView().getSystemUiVisibility();
+                    uiOptions &= ~View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN;
+                    uiOptions &= ~View.SYSTEM_UI_FLAG_FULLSCREEN;
+
+                    window.getDecorView().setSystemUiVisibility(uiOptions);
+
+                    // CB-11197 We still need to update LayoutParams to force status bar
+                    // to be hidden when entering e.g. text fields
+                    window.clearFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
                 });
                 return true;
 
             case ACTION_HIDE:
                 activity.runOnUiThread(() -> {
-                    WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-                    if (controller != null) {
-                        // Hide logic from your proven code
-                        controller.hide(WindowInsetsCompat.Type.statusBars());
-                        controller.setSystemBarsBehavior(WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
-                        callbackContext.success("Status bar hidden");
-                    }
+                    int uiOptions = window.getDecorView().getSystemUiVisibility()
+                        | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                        | View.SYSTEM_UI_FLAG_FULLSCREEN;
+
+                    window.getDecorView().setSystemUiVisibility(uiOptions);
+
+                    // CB-11197 We still need to update LayoutParams to force status bar
+                    // to be hidden when entering e.g. text fields
+                    window.addFlags(WindowManager.LayoutParams.FLAG_FULLSCREEN);
                 });
                 return true;
 
             case ACTION_BACKGROUND_COLOR_BY_HEX_STRING:
                 activity.runOnUiThread(() -> {
                     try {
-                        String hexColor = args.getString(0);
-                        setStatusBarBackgroundColor(hexColor);
-                        callbackContext.success("Color updated successfully");
+                        setStatusBarBackgroundColor(args.getString(0));
                     } catch (JSONException ignore) {
                         LOG.e(TAG, "Invalid hexString argument, use f.i. '#777777'");
-                        callbackContext.error("Invalid color format");
                     }
                 });
                 return true;
@@ -135,9 +147,7 @@ public class StatusBar extends CordovaPlugin {
             case ACTION_OVERLAYS_WEB_VIEW:
                 activity.runOnUiThread(() -> {
                     try {
-                        boolean overlays = args.getBoolean(0);
-                        setStatusBarTransparent(overlays);
-                        callbackContext.success("Overlay updated");
+                        setStatusBarTransparent(args.getBoolean(0));
                     } catch (JSONException ignore) {
                         LOG.e(TAG, "Invalid boolean argument");
                     }
@@ -145,17 +155,11 @@ public class StatusBar extends CordovaPlugin {
                 return true;
 
             case ACTION_STYLE_DEFAULT:
-                activity.runOnUiThread(() -> {
-                    setStatusBarStyle(STYLE_DEFAULT);
-                    callbackContext.success();
-                });
+                activity.runOnUiThread(() -> setStatusBarStyle(STYLE_DEFAULT));
                 return true;
 
             case ACTION_STYLE_LIGHT_CONTENT:
-                activity.runOnUiThread(() -> {
-                    setStatusBarStyle(STYLE_LIGHT_CONTENT);
-                    callbackContext.success();
-                });
+                activity.runOnUiThread(() -> setStatusBarStyle(STYLE_LIGHT_CONTENT));
                 return true;
 
             default:
@@ -163,64 +167,46 @@ public class StatusBar extends CordovaPlugin {
         }
     }
 
-    /**
-     * Exact color setting and auto-brightness logic from your working file.
-     */
-    private void setStatusBarBackgroundColor(String hexColor) {
-        if (hexColor == null || hexColor.isEmpty()) return;
+    private void setStatusBarBackgroundColor(final String colorPref) {
+        if (colorPref.isEmpty()) return;
 
+        int color;
         try {
-            if (!hexColor.startsWith("#")) {
-                hexColor = "#" + hexColor;
-            }
-
-            int colorInt = Color.parseColor(hexColor);
-            
-            // Let Android natively apply the color over the edge-to-edge content
-            window.setStatusBarColor(colorInt);
-
-            // Update icon colors based on brightness
-            WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-            if (controller != null) {
-                double brightness = (0.299 * Color.red(colorInt) + 0.587 * Color.green(colorInt) + 0.114 * Color.blue(colorInt));
-                boolean isLight = brightness > 150;
-                controller.setAppearanceLightStatusBars(isLight);
-            }
-        } catch (IllegalArgumentException e) {
-            LOG.e(TAG, "Invalid hexString argument, use f.i. '#999999'. Error: " + e.getMessage());
+            color = Color.parseColor(colorPref);
+        } catch (IllegalArgumentException ignore) {
+            LOG.e(TAG, "Invalid hexString argument, use f.i. '#999999'");
+            return;
         }
+
+        window.clearFlags(WindowManager.LayoutParams.FLAG_TRANSLUCENT_STATUS); // SDK 19-30
+        window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS); // SDK 21
+        window.setStatusBarColor(color);
     }
 
-    /**
-     * Controls whether the WebView slides underneath the status bar (Edge-to-Edge)
-     */
     private void setStatusBarTransparent(final boolean isTransparent) {
-        // false = app content sits below status bar
-        // true = app content slides under status bar (edge-to-edge)
-        WindowCompat.setDecorFitsSystemWindows(window, !isTransparent);
+        final Window window = cordova.getActivity().getWindow();
+        int visibility = isTransparent
+            ? View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+            : View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_VISIBLE;
+
+        window.getDecorView().setSystemUiVisibility(visibility);
 
         if (isTransparent) {
             window.setStatusBarColor(Color.TRANSPARENT);
-        } else {
-            // Default to black if not transparent (Cordova legacy behavior)
-            window.setStatusBarColor(Color.BLACK);
         }
     }
 
-    /**
-     * Manual override for Status Bar icon colors
-     */
     private void setStatusBarStyle(final String style) {
-        if (style == null || style.isEmpty()) return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !style.isEmpty()) {
+            View decorView = window.getDecorView();
+            WindowInsetsControllerCompat windowInsetsControllerCompat = WindowCompat.getInsetsController(window, decorView);
 
-        WindowInsetsControllerCompat controller = WindowCompat.getInsetsController(window, window.getDecorView());
-        if (controller != null) {
             if (style.equals(STYLE_DEFAULT)) {
-                // Dark icons (for light backgrounds)
-                controller.setAppearanceLightStatusBars(true);
+                windowInsetsControllerCompat.setAppearanceLightStatusBars(true);
             } else if (style.equals(STYLE_LIGHT_CONTENT)) {
-                // Light icons (for dark backgrounds)
-                controller.setAppearanceLightStatusBars(false);
+                windowInsetsControllerCompat.setAppearanceLightStatusBars(false);
+            } else {
+                LOG.e(TAG, "Invalid style, must be either 'default' or 'lightcontent'");
             }
         }
     }
